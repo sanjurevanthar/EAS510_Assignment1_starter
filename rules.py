@@ -147,9 +147,7 @@ def rule1_metadata(target, input_path):
         out["fired"] = score > 0
         out["metric"] = round(score / out["out_of"], 3)
         out["note"] = f"Size ratio {size_ratio:.2f}"
-        if out["metric"] >= 0.6:
-            out["fired"] = True
-            out["score"] = int(round(out["out_of"] * out["metric"]))
+        
     except Exception:
         pass
     return out
