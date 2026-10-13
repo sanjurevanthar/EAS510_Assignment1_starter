@@ -75,21 +75,55 @@ def _size(path):
     except Exception:
         return None
 
+@lru_cache(maxsize=256)
+def _format(path):
+    """Returns "jpeg" or "png" or "other" by using the header"""
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if head[:2] == b"\xff\xd8":
+        return "jpeg"
+    if head[:4] == b"\x89PNG":
+        return "png"
+    return "other"
+
+
 
 def rule1_metadata(target, input_path):
     """File size + dimensions. Compression and crops leave size fingerprints."""
     out = {"rule": 1, "name": "Metadata", "fired": False, "score": 0,
            "out_of": 30, "note": "Size ratio 0.00", "metric": 0.0}
     try:
-        src_size = os.path.getsize(target["path"])
-        in_size = os.path.getsize(input_path)
+        #Fetch file size
+        src_size = os.stat(target["path"]).st_size
+        in_size = os.stat(input_path).st_size
+        size_ratio = in_size/ src_size
+
+
+        #Original and Suspect dimentions
         src_w, src_h = _size(target["path"]) or (0, 0)
         in_w, in_h = _size(input_path) or (0, 0)
-        size_ratio = min(src_size, in_size) / max(src_size, in_size)
-        area_kept = (in_w * in_h) / max(1, src_w * src_h)
-        metric = 0.5 * size_ratio + 0.5 * min(1.0, area_kept)
-        out["metric"] = round(max(0.0, min(1.0, metric)), 3)
-        out["note"] = f"Size ratio {out['metric']:.2f}"
+        same_dim = (in_w, in_h) == (src_w, src_h)
+        #is_crop: the suspect is smaller than the original in width and height and not identical in size
+        is_crop = in_w <= src_w and in_h <= src_h and not same_dim
+
+        format_changed = _format(input_path) != _format(target["path"])
+
+        #Scoring:
+        score = 0
+        if same_dim:
+            score += 15
+            if format_changed:
+                score += 15
+            elif size_ratio < 1.0:
+                score += 10
+        elif is_crop:
+            score += 20
+
+        #Updating Out
+        out["score"] = score
+        out["fired"] = score > 0
+        out["metric"] = round(score/out["out_of"], 3)
+        out["note"] = f"Size ratio {size_ratio:.2f}"
         if out["metric"] >= 0.6:
             out["fired"] = True
             out["score"] = int(round(out["out_of"] * out["metric"]))
