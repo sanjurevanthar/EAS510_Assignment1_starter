@@ -44,10 +44,13 @@ def _hist(path):
     img = _arr(path)
     if img is None:
         return None
-    hists = [cv2.calcHist([img], [i], None, [32], [0, 256]) for i in range(3)]
-    hist_all = np.concatenate(hists).ravel().astype(np.float32)
-    cv2.normalize(hist_all, hist_all)
-    return hist_all
+    hsv = cv2.cvtColor(_downscale(img), cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [30, 32], [0, 180, 0, 256])
+
+    #hists = [cv2.calcHist([img], [i], None, [32], [0, 256]) for i in range(3)]
+    #hist_all = np.concatenate(hists).ravel().astype(np.float32)
+    cv2.normalize(hist, hist)
+    return hist
 
 
 def _downscale(img, max_dim=512):
@@ -143,9 +146,9 @@ def rule2_histogram(target, input_path):
         corr = float(cv2.compareHist(hs, hi, cv2.HISTCMP_CORREL))
         out["metric"] = round(max(0.0, min(1.0, corr)), 3)
         out["note"] = f"Correlation {out['metric']:.2f}"
-        if out["metric"] >= 0.5:
+        if out["metric"] >= 0.6:
             out["fired"] = True
-            out["score"] = int(round(out["out_of"] * out["metric"]))
+            out["score"] = int(round(out["out_of"] * out["metric"] ** 2 ))
     except Exception:
         pass
     return out
