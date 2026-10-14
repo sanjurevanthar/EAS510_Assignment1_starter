@@ -44,11 +44,10 @@ def _hist(path):
     img = _arr(path)
     if img is None:
         return None
-    hsv = cv2.cvtColor(_downscale(img), cv2.COLOR_BGR2HSV)
-    hist = cv2.calcHist([hsv], [0, 1], None, [30, 32], [0, 180, 0, 256])
-
-    cv2.normalize(hist, hist)
-    return hist
+    hists = [cv2.calcHist([img], [i], None, [32], [0, 256]) for i in range(3)]
+    hist_all = np.concatenate(hists).ravel().astype(np.float32)
+    cv2.normalize(hist_all, hist_all)
+    return hist_all
 
 
 def _downscale(img, max_dim=512):
@@ -68,22 +67,6 @@ def _gray(path):
     return _downscale(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
 
 
-def _scaled_pair(target_path, input_path, max_dim=512):
-    """Works out the shrink factor from original, shrink the original and suspect by that factor"""
-    tgt, sus = _arr(target_path), _arr(input_path)
-    if tgt is None or sus is None:
-        return None, None
-    th, tw = tgt.shape[:2]
-    scale = min(1.0, max_dim / max(th, tw))
-
-    def prep(img):
-        h, w = img.shape[:2]
-        img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
-        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    return prep(tgt), prep(sus)
-
-
 @lru_cache(maxsize=256)
 def _size(path):
     try:
@@ -93,61 +76,23 @@ def _size(path):
         return None
 
 
-@lru_cache(maxsize=256)
-def _format(path):
-    """Returns "jpeg" or "png" or "other" by using the header"""
-    with open(path, "rb") as f:
-        head = f.read(8)
-    if head[:2] == b"\xff\xd8":
-        return "jpeg"
-    if head[:4] == b"\x89PNG":
-        return "png"
-    return "other"
-
-
 def rule1_metadata(target, input_path):
     """File size + dimensions. Compression and crops leave size fingerprints."""
-    out = {
-        "rule": 1,
-        "name": "Metadata",
-        "fired": False,
-        "score": 0,
-        "out_of": 30,
-        "note": "Size ratio 0.00",
-        "metric": 0.0,
-    }
+    out = {"rule": 1, "name": "Metadata", "fired": False, "score": 0,
+           "out_of": 30, "note": "Size ratio 0.00", "metric": 0.0}
     try:
-        # Fetch file size
-        src_size = os.stat(target["path"]).st_size
-        in_size = os.stat(input_path).st_size
-        size_ratio = in_size / src_size
-
-        # Original and Suspect dimentions
+        src_size = os.path.getsize(target["path"])
+        in_size = os.path.getsize(input_path)
         src_w, src_h = _size(target["path"]) or (0, 0)
         in_w, in_h = _size(input_path) or (0, 0)
-        same_dim = (in_w, in_h) == (src_w, src_h)
-        # is_crop: the suspect is smaller than the original in width and height and not identical in size
-        is_crop = in_w <= src_w and in_h <= src_h and not same_dim
-
-        format_changed = _format(input_path) != _format(target["path"])
-
-        # Scoring:
-        score = 0
-        if same_dim:
-            score += 15
-            if format_changed:
-                score += 15
-            elif size_ratio < 1.0:
-                score += 10
-        elif is_crop:
-            score += 20
-
-        # Updating Out
-        out["score"] = score
-        out["fired"] = score > 0
-        out["metric"] = round(score / out["out_of"], 3)
-        out["note"] = f"Size ratio {size_ratio:.2f}"
-        
+        size_ratio = min(src_size, in_size) / max(src_size, in_size)
+        area_kept = (in_w * in_h) / max(1, src_w * src_h)
+        metric = 0.5 * size_ratio + 0.5 * min(1.0, area_kept)
+        out["metric"] = round(max(0.0, min(1.0, metric)), 3)
+        out["note"] = f"Size ratio {out['metric']:.2f}"
+        if out["metric"] >= 0.6:
+            out["fired"] = True
+            out["score"] = int(round(out["out_of"] * out["metric"]))
     except Exception:
         pass
     return out
@@ -155,15 +100,8 @@ def rule1_metadata(target, input_path):
 
 def rule2_histogram(target, input_path):
     """Color histogram correlation. Robust to crops and spatial changes."""
-    out = {
-        "rule": 2,
-        "name": "Histogram",
-        "fired": False,
-        "score": 0,
-        "out_of": 30,
-        "note": "Correlation 0.00",
-        "metric": 0.0,
-    }
+    out = {"rule": 2, "name": "Histogram", "fired": False, "score": 0,
+           "out_of": 30, "note": "Correlation 0.00", "metric": 0.0}
     try:
         hs, hi = _hist(target["path"]), _hist(input_path)
         if hs is None or hi is None:
@@ -171,9 +109,9 @@ def rule2_histogram(target, input_path):
         corr = float(cv2.compareHist(hs, hi, cv2.HISTCMP_CORREL))
         out["metric"] = round(max(0.0, min(1.0, corr)), 3)
         out["note"] = f"Correlation {out['metric']:.2f}"
-        if out["metric"] >= 0.6:
+        if out["metric"] >= 0.5:
             out["fired"] = True
-            out["score"] = int(round(out["out_of"] * out["metric"] ** 2))
+            out["score"] = int(round(out["out_of"] * out["metric"]))
     except Exception:
         pass
     return out
@@ -186,33 +124,21 @@ def rule3_template(target, input_path):
     (original); on rotated/resized suspects this rule degrades fast. Fixing
     that becomes Rule 4 territory.
     """
-    out = {
-        "rule": 3,
-        "name": "Template",
-        "fired": False,
-        "score": 0,
-        "out_of": 40,
-        "note": "Match score 0.00",
-        "metric": 0.0,
-    }
+    out = {"rule": 3, "name": "Template", "fired": False, "score": 0,
+           "out_of": 40, "note": "Match score 0.00", "metric": 0.0}
     try:
-        src_g, nd_g = _scaled_pair(target["path"], input_path)
-
+        src_g = _gray(target["path"])
+        nd_g = _gray(input_path)
         if src_g is None or nd_g is None:
             return out
         if (src_g.shape[0] < nd_g.shape[0]) or (src_g.shape[1] < nd_g.shape[1]):
-            nd_g = cv2.resize(
-                nd_g,
-                (
-                    min(nd_g.shape[1], src_g.shape[1]),
-                    min(nd_g.shape[0], src_g.shape[0]),
-                ),
-            )
+            nd_g = cv2.resize(nd_g, (min(nd_g.shape[1], src_g.shape[1]),
+                                     min(nd_g.shape[0], src_g.shape[0])))
         res = cv2.matchTemplate(src_g, nd_g, cv2.TM_CCOEFF_NORMED)
         metric = float(res.max())
         out["metric"] = round(max(0.0, min(1.0, metric)), 3)
         out["note"] = f"Match score {out['metric']:.2f}"
-        if out["metric"] >= 0.5:
+        if out["metric"] >= 0.4:
             out["fired"] = True
             out["score"] = int(round(out["out_of"] * out["metric"]))
     except Exception:
