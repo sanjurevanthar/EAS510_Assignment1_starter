@@ -67,7 +67,7 @@ class SimpleDetector:
                 total += int(ev.get("score", 0))
                 max_score += int(ev.get("out_of", 0))
                 evidence.append(ev)
-            confidence = round(100.0 * total / max_score, 1) if max_score else 0.0
+            confidence = float(total)  # plain sum so Final Score == sum of rule points
             results.append({"target": stem, "confidence": confidence,
                             "evidence": evidence})
         return results
