@@ -10,25 +10,43 @@ Score stays on a /100 scale (the format validator enforces "Final Score:
 Example split that keeps the original spirit: Rules 1-3 -> 25/25/40 and
 Rule 4 -> 10 (or trim the losers more aggressively).
 """
+import cv2
+import numpy as np
 
 import rules
+from rules import _gray
 
 #: Import the original rules and append your new one.
 RULES = rules.RULES + ("rule4_edges",)
 
-
 def rule4_edges(target, input_path):
-    """TODO: replace with your Phase 2 rule that fixes the V1 weakness.
+    """ORB feature matching + RANSAC: robust to crop, resize, brightness."""
+    out = {"rule": 4, "name": "ORB", "fired": False, "score": 0,
+           "out_of": 10, "note": "Inliers 0", "metric": 0.0}
+    try:
+        orb = cv2.ORB_create(nfeatures=1000)
+        ka, da = orb.detectAndCompute(_gray(input_path), None)
+        kb, db = orb.detectAndCompute(_gray(target["path"]), None)
+        if da is None or db is None:
+            return out
 
-    Starter returns a no-op so the pipeline still runs before you implement it.
-    Parity with rules.py rule dict: rule/name/fired/score/out_of/note/metric.
-    """
-    return {
-        "rule": 4,
-        "name": "Edges",
-        "fired": False,
-        "score": 0,
-        "out_of": 10,
-        "note": "Not implemented",
-        "metric": 0.0,
-    }
+        pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(da, db, k=2)
+        good = [p[0] for p in pairs
+                if len(p) == 2 and p[0].distance < 0.75 * p[1].distance]
+
+        inliers = 0
+        if len(good) >= 4:
+            src = np.float32([ka[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+            dst = np.float32([kb[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+            _, mask = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
+            if mask is not None:
+                inliers = int(mask.sum())
+
+        out["metric"] = round(min(1.0, inliers / 40), 3)
+        out["note"] = f"Inliers {inliers}"
+        if inliers >= 15:
+            out["fired"] = True
+            out["score"] = int(round(out["out_of"] * out["metric"]))
+    except Exception:
+        pass
+    return out

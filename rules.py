@@ -13,8 +13,7 @@ returns a dict:
         "metric": 0.85,              # raw similarity measure in [0, 1]
     }
 
-The points budgets are fixed by the assignment: Rule 1 = 30, Rule 2 = 30,
-Rule 3 = 40. The detector sums them into a 0-100 confidence score.
+The points budgets are: Rule 1 = 25, Rule 2 = 25, Rule 3 = 40 (Rule 4 = 10 lives in rules_v2.py). The detector sums them into a 0-100 confidence score.
 
 These starter implementations are deliberately WEAK baselines (they hinge on
 simple thresholds). Improving them is the assignment.
@@ -91,7 +90,7 @@ def _format(path):
 def rule1_metadata(target, input_path):
     """File size + dimensions. Compression and crops leave size fingerprints."""
     out = {"rule": 1, "name": "Metadata", "fired": False, "score": 0,
-           "out_of": 30, "note": "Size ratio 0.00", "metric": 0.0}
+           "out_of": 25, "note": "Size ratio 0.00", "metric": 0.0}
     try:
         # Fetch file size
         src_size = os.stat(target["path"]).st_size
@@ -119,9 +118,10 @@ def rule1_metadata(target, input_path):
             score += 20
 
         # Updating Out
-        out["score"] = score
+        # raw score is out of 30; rescale to the 25-point budget
+        out["score"] = int(round(score * out["out_of"] / 30))
         out["fired"] = score > 0
-        out["metric"] = round(score / out["out_of"], 3)
+        out["metric"] = round(score / 30, 3)
         out["note"] = f"Size ratio {size_ratio:.2f}"
 
     except Exception:
@@ -132,7 +132,7 @@ def rule1_metadata(target, input_path):
 def rule2_histogram(target, input_path):
     """Color histogram correlation. Robust to crops and spatial changes."""
     out = {"rule": 2, "name": "Histogram", "fired": False, "score": 0,
-           "out_of": 30, "note": "Correlation 0.00", "metric": 0.0}
+           "out_of": 25, "note": "Correlation 0.00", "metric": 0.0}
     try:
         hs, hi = _hist(target["path"]), _hist(input_path)
         if hs is None or hi is None:

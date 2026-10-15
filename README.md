@@ -82,6 +82,70 @@ Your Codio box can be reset at any time. **Your fork on GitHub is the only safe
 copy.** After every milestone run `./submit.sh "describe what you did"`. A box
 restart never touches GitHub.
 
+## My Reflection:
+
+## 1. Observed weakness in V1: what failed and why
+
+
+## 2. Design decision for V2: what Rule 4 is and why you chose it
+
+Rule 4 checks the shape and structure of images, it usees ORB feature matching for the comparison. ORB cpmpares images by small patterns, not by the pixel positions, so it works for the crop and resized images.
+
+### How does it work?
+ 1. Find the ORB keypoints(corners) from the both suspect and original images, say upto 1000 points.
+ 2. Now compare the keypoints between the two images to find pairs that look similar.
+ 3. Keep the pair only if it is better than the next best option(ratio test)
+ 4. Use RANSAC(Random Sample Consensus) to check which pairs agree on the same overall movement between the images.
+ 5. The good pairs are called inliers.
+ 6. Now the rule checks for 15 inliers to count and 40+ would give full score.
+
+### why ORB?
+ 1. In Croped and Resized images, ORB matches by the keypoints, so the croped area still matches the same keypoints in the original.
+ 2. For brightness and compression, ORB compares the nearby pixels with each other, so the overall brightness change cancels out and the fingerprint of the keypoint remains unchanged.
+ 3. The ratio test and RANSAC removes unclear matches, it is less likely to produce the 15 inliers so, this rule is safe.
+   
+### why to choose ORB instead of SIFT?
+ORB is fast than SIFT and it is simple and easy to implement using OpenCV
+
+## 3. Effect of the change: accuracy before/after on easy vs hard
+
+### Accuracy on Easy:
+
+### Dataset                                       Before(P1)                            After(P2)
+
+    1. Easy - modified(before improving)(60)       32(53%)                             NA
+    2. Easy - modified(after Rule 1 improve)(60)   39(65%)                             43(72%)
+    3. Easy - random                               15/15 reject                        15/15 reject
+
+### Accuracy on Hard:
+
+### Dataset                                       Before(P1)                            After(P2)
+
+    1. Hard(60)                                    41(68%)                              51(85%)
+
+### Did Accuracy improve? 
+Yes it got improved by almost 10%. Since the weightage of rule 4 is only 10, it did not affect the overall score much, resulting in a little improvement in the accuracy.
+
+In the hard set the accuracy improved a lot because it contains more crop and resized images which is effectively handled by rule 4. 
+Eg: 
+we have "original_00__crop_keep70__bright__compress__q40__v2.jpg" score = 47(REJECTED) in phase 1.
+In phase 2 it went to score = 50(MATCHED) with 277 ORB inliers.
+
+
+## 4. Trade-offs: what new costs or risks did Rule 4 introduce
+
+There is not much risk added due to the addition of rule 4, but there is a few trade-offs.
+
+1. Execution Time:
+   The execution time of the all 4 rule execution has been increased, because the ORB is recalculated for every image pair. So incase of 1000 to million images, it would consume few hours to days.
+2. Hardcoded Values:
+   The limits for the inliers(15, 40), 0.75 test ratio and the 5 pixel RANSAC tolerence are the fixed values specifically for this dataset. This is a major drawback as this rule cannot be used for any similar datasets.
+3. Edge Cases Failure:
+   In case of plain and croped images, the rule finds hard to find the inliers(less than 15). Hence looses the score for the rule 4 and getting rejected(Increasing False Negatives).
+4. Score of Rule4:
+   The score of rule 4 has no less impact, apart from the edge cases, this is a good criteria for comparison(shape and structure). Improving the score from 10 to 25 might help in increasing the accuracy.
+
+
 ## License
 
 Apache 2.0. See `LICENSE`.
