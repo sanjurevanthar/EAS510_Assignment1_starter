@@ -21,7 +21,7 @@ RULES = rules.RULES + ("rule4_edges",)
 
 def rule4_edges(target, input_path):
     """ORB feature matching + RANSAC: robust to crop, resize, brightness."""
-    out = {"rule": 4, "name": "ORB", "fired": False, "score": 0,
+    out = {"rule": 4, "name": "Edges", "fired": False, "score": 0,
            "out_of": 10, "note": "Inliers 0", "metric": 0.0}
     try:
         orb = cv2.ORB_create(nfeatures=1000)

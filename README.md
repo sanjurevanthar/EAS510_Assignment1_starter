@@ -86,10 +86,44 @@ restart never touches GitHub.
 
 ## 1. Observed weakness in V1: what failed and why
 
+The main reason for the failure of v1 is on the cropped and resized images. On these images the rule 3 scores 0/40 and rule and 2 barely reaches 40+ combined, which is less than the threshold.
+
+### Improvement on phase 1:
+
+I modified the rule 1 implementation, helping the cropped and resized images to reach the threshold. Originally rule 1 uses meta data and award score to the images with how similar file size are and how much of the original's pixel area the suspect holds. In case of cropped and resized images the average fell below 0.6 and get 0 for 30 as the resulting score.
+
+Improved rule asks 3 questions:
+1. same width same size -> +15, suggesting a full-frame copy
+2. if different image format(+15), in case of smaller file(+10) - suggesting a format change or compression of file
+3. if not same size and suspect smaller by width and length(+20) - created specifically for cropped images
+
+This increased accuracy from 32/60 to 39/60 for easy modified images. In case of hard images, it holds more cropped and resized images for which this improvement is not enough.
+
+From this file "results_v1_hard.txt", we can see that amoung 19/60 rejected hard images, all the 19 were crop or resize variants. Here in all 19 rejections, the score given by the rule 3 is 0/40.
+Eg: for a image original_00__crop_keep70__bright__compress__q40__v2.jpg
+rule 1: 20
+rule 2: 27
+rule 3: 0
+
+### Main Reason?
+
+Rule 3 Failure for the Cropped and resized variants.
+
+### Why this failure?
+
+In rule 3, it uses cv2.matchTemplate which slides the suspect over original, looking for same pixels at the same scale. So incase of any change in size(resize, crop) makes the match collapse. Hence resulting in the "0" score for the image pairs.
+
+Rule 1 doesnot handles the images well, it just check for 3 different conditions just to handle the cropped and rescaled variants, it tells us how a file may be changed but it does not tell us if that is the same image. So this would mislead the system.
+
+So, Rule 3 cannot handle change or scaled images and rule 1 gives same points to similar meta data images and rule 2 gives color only. 
+
+So from the above no rule confirms about the SHAPE, STRUCTURE  or the CONTENT of the picture. It is this reason makes v1 weak.
+
+
 
 ## 2. Design decision for V2: what Rule 4 is and why you chose it
 
-Rule 4 checks the shape and structure of images, it usees ORB feature matching for the comparison. ORB cpmpares images by small patterns, not by the pixel positions, so it works for the crop and resized images.
+Rule 4 checks the shape and structure of images, it uses ORB feature matching for the comparison. ORB cpmpares images by small patterns, not by the pixel positions, so it works for the crop and resized images.
 
 ### How does it work?
  1. Find the ORB keypoints(corners) from the both suspect and original images, say upto 1000 points.
@@ -100,7 +134,7 @@ Rule 4 checks the shape and structure of images, it usees ORB feature matching f
  6. Now the rule checks for 15 inliers to count and 40+ would give full score.
 
 ### why ORB?
- 1. In Croped and Resized images, ORB matches by the keypoints, so the croped area still matches the same keypoints in the original.
+ 1. In Croped and Resized images, ORB matches by the keypoints, so the cropped area still matches the same keypoints in the original.
  2. For brightness and compression, ORB compares the nearby pixels with each other, so the overall brightness change cancels out and the fingerprint of the keypoint remains unchanged.
  3. The ratio test and RANSAC removes unclear matches, it is less likely to produce the 15 inliers so, this rule is safe.
    
@@ -126,7 +160,7 @@ ORB is fast than SIFT and it is simple and easy to implement using OpenCV
 ### Did Accuracy improve? 
 Yes it got improved by almost 10%. Since the weightage of rule 4 is only 10, it did not affect the overall score much, resulting in a little improvement in the accuracy.
 
-In the hard set the accuracy improved a lot because it contains more crop and resized images which is effectively handled by rule 4. 
+In the hard set the accuracy improved a lot(+17%) because it contains more crop and resized images which is effectively handled by rule 4. 
 Eg: 
 we have "original_00__crop_keep70__bright__compress__q40__v2.jpg" score = 47(REJECTED) in phase 1.
 In phase 2 it went to score = 50(MATCHED) with 277 ORB inliers.
@@ -141,7 +175,7 @@ There is not much risk added due to the addition of rule 4, but there is a few t
 2. Hardcoded Values:
    The limits for the inliers(15, 40), 0.75 test ratio and the 5 pixel RANSAC tolerence are the fixed values specifically for this dataset. This is a major drawback as this rule cannot be used for any similar datasets.
 3. Edge Cases Failure:
-   In case of plain and croped images, the rule finds hard to find the inliers(less than 15). Hence looses the score for the rule 4 and getting rejected(Increasing False Negatives).
+   In case of plain and cropped images, the rule finds hard to find the inliers(less than 15). Hence looses the score for the rule 4 and getting rejected(Increasing False Negatives).
 4. Score of Rule4:
    The score of rule 4 has no less impact, apart from the edge cases, this is a good criteria for comparison(shape and structure). Improving the score from 10 to 25 might help in increasing the accuracy.
 
